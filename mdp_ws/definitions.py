@@ -1,0 +1,5 @@
+
+
+MODES = ["MANUAL", "TASK1", "TASK2", "TASKB"]
+TASKSTATUSES = ["START", "PAUSE", "STOP", "IN-PROGRESS"]
+MOVES = ["F", "B", "L", "R"]

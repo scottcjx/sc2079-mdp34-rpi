@@ -1,3 +1,7 @@
+# communication.py
+
+import os
+import bluetooth
 import serial
 import threading
 import time
@@ -122,3 +126,60 @@ class AbstractSerialInterface(ABC):
             print(f"{self.port} Not connected. Cannot receive data.")
             return None
 
+class CarInterface(AbstractSerialInterface):
+    def rx_callback(self, data):
+        print(f"Data received: {data}")
+
+
+class AppInterface(AbstractSerialInterface):
+    def rx_callback(self, data):
+        print(f"Data received: {data}")
+
+    def setup_bluetooth(self, port = 1):
+        self.btport = port
+
+        os.system("sudo hciconfig hci0 piscan")
+        os.system(f"sudo sdptool add --channel={self.btport} SP")
+        os.system(f"sudo rfcomm listen 0 {self.btport} &")
+
+        server_sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
+        success = 0
+        while not success:
+            try:
+                server_sock.bind(("", self.btport))
+                server_sock.listen(self.btport)
+                print("[BT] Bound to port %d" % self.btport)
+                success = 1
+            except Exception as e:
+                print("[BT] Could not bind to port %d: %s" % (self.btport, e))
+
+        if success:
+            print("[BT] Waiting for connection on RFCOMM channel %d" % self.btport)
+        else:
+            print("[BT] Failed to bind after trying multiple ports.")
+
+
+def main():
+    # carInterface = CarInterface(port='/dev/ttyUSB0', baudrate=115200)
+    appInterface = AppInterface(port='/dev/rfcomm0', baudrate=9600)
+
+    # carInterface.connect()
+    # appInterface.setup_bluetooth()
+    appInterface.connect()
+
+    val = 0
+    try:
+        while 1:
+            # appInterface.tx(f"val: {val}".encode())
+            # carInterface.tx(f"val: {val}".encode())
+            val += 1
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        # carInterface.disconnect()
+        appInterface.disconnect()
+
+
+if __name__ == "__main__":
+    main()
