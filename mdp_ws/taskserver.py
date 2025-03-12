@@ -1,142 +1,124 @@
 import threading
-from queue import Queue
-
+import time
 import logging
+from queue import Queue, Empty
 from sharedResources import SharedRsc, sharedResources
 from definitions import *
-
 from car import Car
-from andriodapp import AndriodApp
+from androidapp import AndroidApp
 
 logger = logging.getLogger("TaskServer")
 
-
-
-# notes:
-# taskServer needs to be in task1 to rx map
-# taskServer will listen to andriod rx queue commands
-
 class TaskServer:
-    sharedResources: SharedRsc
-
-    def __init__(self, car: Car, andriodApp: AndriodApp, sharedResources):
+    def __init__(self, car: Car, android_app: AndroidApp, shared_resources: SharedRsc):
         self.car = car
-        self.androidApp = andriodApp
-        self.sharedResources = sharedResources
+        self.android_app = android_app
+        self.shared_resources = shared_resources
+        self.current_mode = "MANUAL"
+        self.mode_changed = False
+        self._running = False
+        self.loop_thread = None
 
-    def setupManual(self):
-        sharedResources.set("APP.MOVE.REQ", Queue(1))
+        # Ensure mode request queue exists
+        if not self.shared_resources.get("TASK.MODE.REQ"):
+            self.shared_resources.set("TASK.MODE.REQ", Queue(1))
 
-    def loopManual(self):
-        if sharedResources.get("APP.MOVE.REQ").not_empty:
-            # has new command request
-            cmd = sharedResources.get("APP.MOVE.REQ").get()
-            self.car.move_std(cmd)
+    def setup_manual(self):
+        logger.info("[TaskServer] Setting up MANUAL mode")
+        self.shared_resources.set("APP.MOVE.REQ", Queue(1))
+    
+    def loop_manual(self):
+        logger.debug("[TaskServer] Loop MANUAL mode")
+        try:
+            move_cmd = self.shared_resources.get("APP.MOVE.REQ").get_nowait()
+            # Use standardized API: move_standard for Car.
+            self.car.move(move_cmd)
+        except Empty:
+            pass
 
-    def setupTask1(self):
+    def setup_task1(self):
+        logger.info("[TaskServer] Setting up TASK1 mode")
+        # TODO: Initialize components specific to TASK1.
         pass
 
-    def loopTask1(self):
-        
-        # if map not yet entered, wait for map entry
-
-        # if map is entered, new flag up
-
-        # process map, send map to algo, receive instructions from the algo
-        # queue move instructions into cache
-
-        # if pause & stop cmd in cmd queue, handle accordingly
-
-        
+    def loop_task1(self):
+        logger.debug("[TaskServer] Loop TASK1 mode")
+        # TODO: Add processing logic for TASK1.
         pass
 
-    def setupTask2(self):
+    def setup_task2(self):
+        logger.info("[TaskServer] Setting up TASK2 mode")
+        # TODO: Initialize components specific to TASK2.
         pass
 
-    def loopTask2(self):
+    def loop_task2(self):
+        logger.debug("[TaskServer] Loop TASK2 mode")
+        # TODO: Add processing logic for TASK2.
         pass
 
-    def setupTaskB(self):
+    def setup_taskB(self):
+        logger.info("[TaskServer] Setting up TASKB mode")
+        # TODO: Initialize components specific to TASKB.
         pass
 
-    def loopTaskB(self):
+    def loop_taskB(self):
+        logger.debug("[TaskServer] Loop TASKB mode")
+        # TODO: Add processing logic for TASKB.
         pass
 
     def setup(self):
-        pass
+        logger.info("[TaskServer] Setup")
+        self.shared_resources.set("TASK.MODE", "MANUAL")
+        self.setup_manual()
+
+    def _handle_mode_change(self):
+        try:
+            mode_queue = self.shared_resources.get("TASK.MODE.REQ")
+            new_mode = mode_queue.get_nowait()
+            self.shared_resources.set("TASK.MODE", new_mode)
+            self.current_mode = new_mode
+            self.mode_changed = True
+            logger.info(f"Switched to mode: {new_mode}")
+        except Empty:
+            pass
 
     def loop(self):
-        flag_newtask = 0
-        #  if there is a new req for MODE, handle
-        if self.sharedResource.get("TASK.MODE.REQ").not_empty:
-            # clean up
-
-            newmode = self.sharedResource.get("TASK.MODE.REQ").get()
-            self.sharedResources.set("TASK.MODE", newmode)
-            flag_newtask = 1
-
-        self.taskmode = self.sharedResources.get("TASK.MODE")
-
-        if (self.taskmode == "MANUAL"):
-            if flag_newtask:
-                self.setupManual()
-            self.loopManual()
-        elif (self.taskmode == "TASK1"):
-            if flag_newtask:
-                self.setupTask1()
-            self.loopTask1()
-        elif (self.taskmode == "TASK2"):
-            if flag_newtask:
-                self.setupTask2()
-            self.loopTask2()
-        elif (self.taskmode == "TASKB"):
-            if flag_newtask:
-                self.setupTaskB()
-            self.loopTaskB()
+        self._running = True
+        while self._running:
+            self.mode_changed = False
+            self._handle_mode_change()
+            mode = self.shared_resources.get("TASK.MODE")
+            if mode is None:
+                mode = "MANUAL"
+                self.shared_resources.set("TASK.MODE", mode)
+            if mode == "MANUAL":
+                if self.mode_changed:
+                    self.setup_manual()
+                self.loop_manual()
+            elif mode == "TASK1":
+                if self.mode_changed:
+                    self.setup_task1()
+                self.loop_task1()
+            elif mode == "TASK2":
+                if self.mode_changed:
+                    self.setup_task2()
+                self.loop_task2()
+            elif mode == "TASKB":
+                if self.mode_changed:
+                    self.setup_taskB()
+                self.loop_taskB()
+            else:
+                logger.warning("Unknown mode: %s", mode)
+            time.sleep(0.05)
 
     def start(self):
-        self.loop_thread = threading.Thread(target=self.loop)
-        self.loop_thread.daemon = True
-        self.loop_thread.start()
+        if self.loop_thread is None or not self.loop_thread.is_alive():
+            self.loop_thread = threading.Thread(target=self.loop, daemon=True)
+            self.loop_thread.start()
+            logger.info("TaskServer started.")
 
     def stop(self):
-        self.loop_thread.join()
-    
-
-
-
-# decide the runner based on the current mode of the task.
-# this means that the mode of task needs to be requested and in a queue, this is because it takes time to process the request to trasnfer.
-# we will also need to stop the current context of the app, transfer the context elsewhere and cleanup before switching contexts
-
-# this is a rtos system, interrupt based?
-
-    # def receive_commands(self):
-    #     while True:
-    #         command = input("Enter command (or type 'exit' to quit): ")
-    #         if command.lower() == 'exit':
-    #             break
-    #         self.instruction_queue.put(command)
-
-    # def process_instructions(self):
-    #     while True:
-    #         instruction = self.instruction_queue.get()
-    #         if instruction is None:
-    #             break
-    #         self.car_interface.send_command(instruction)
-    #         data = self.car_interface.receive_data()
-    #         print("Received from car:", data)
-
-    # def run(self):
-    #     receive_thread = threading.Thread(target=self.receive_commands)
-    #     process_thread = threading.Thread(target=self.process_instructions)
-
-    #     receive_thread.start()
-    #     process_thread.start()
-
-    #     receive_thread.join()
-    #     process_thread.join()
-
-    # def close(self):
-    #     self.car_interface.close()
-    #     self.android_app_interface.close()
+        self._running = False
+        if self.loop_thread:
+            self.loop_thread.join()
+            logger.info("TaskServer stopped.")

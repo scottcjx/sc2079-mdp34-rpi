@@ -17,6 +17,8 @@ class AppMessageProtocol():
 
     @classmethod
     def initSharedResource(cls):
+        logger.debug("[AppMessageProtocol]: initSharedResource")
+        
         cls.sharedResources.set("TASK.MODE.REQ", Queue(1))
         cls.sharedResources.set("TASK.STATUS.REQ", Queue(1))
         cls.sharedResources.set("APP.MOVE.REQ", Queue(1))
@@ -24,7 +26,6 @@ class AppMessageProtocol():
     @classmethod
     def setSharedResources(cls, sharedResources):
         cls.sharedResources = sharedResources
-        cls.initSharedResource()
 
     @classmethod
     def decodeMessage(cls, msg: str):
@@ -70,7 +71,6 @@ class AppMessageProtocol():
     def processMap(cls, val):
         "/*MAP=[(0, 00, 00, 1),(1, 00, 00, 2)]*/"
 
-
         # need to note on the task server end. if there is a change to this, algo will break if the movement is already in process.
         # on app side, will have to note to reject the order from the app side
 
@@ -103,9 +103,9 @@ class AppInterface(AbstractSerialInterface):
     sharedResources: SharedRsc
     msgProtocolCls: AppMessageProtocol
     
-    def setupProtocol(self, sharedResources):
+    def setupProtocol(self):
         self.msgProtocolCls = AppMessageProtocol()
-        self.msgProtocolCls.setSharedResources(sharedResources)
+        self.msgProtocolCls.setSharedResources(self.sharedResources)
         self.msgProtocolCls.initSharedResource()
     
     def setSharedResources(self, sharedResources):
@@ -142,14 +142,14 @@ class AppInterface(AbstractSerialInterface):
 class AndriodApp:
     def __init__(self, port):
         self.interface = AppInterface(port=port, baudrate=115200)
-        self.interface.setMsgDecoder()
-        self.interface.setSharedResources()
+        self.interface.setSharedResources(sharedResources)
+        self.interface.setupProtocol()
     
     def txMapDets(self):
         pass
-
-
-
+    
+    def txBotLocation(self):
+        pass
 
 
 if __name__ == "__main__":

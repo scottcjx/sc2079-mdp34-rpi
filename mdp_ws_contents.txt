@@ -1,0 +1,753 @@
+Directory Tree:
+mdp_ws/
+    definitions.py
+    communication.py
+    androidapp.py
+    main.py
+    sharedResources.py
+    car.py
+    taskserver.py
+    protocol.py
+    mdp_ws_contents.txt
+    __pycache__/
+        taskserver.cpython-39.pyc
+        sharedResources.cpython-39.pyc
+        androidapp.cpython-39.pyc
+        communication.cpython-39.pyc
+        car.cpython-39.pyc
+        path_finder_integration.cpython-39.pyc
+        definitions.cpython-39.pyc
+        task_integration.cpython-39.pyc
+        andriodapp.cpython-39.pyc
+        protocol.cpython-39.pyc
+
+File: definitions.py
+
+
+MODES = ["MANUAL", "TASK1", "TASK2", "TASKB"]
+TASKSTATUSES = ["START", "PAUSE", "STOP", "IN-PROGRESS"]
+MOVES = ["F", "B", "L", "R"]
+--------------------------------------------------------------------------------
+File: communication.py
+import serial
+import threading
+import time
+from abc import ABC, abstractmethod
+from collections import deque
+
+class AbstractSerialInterface(ABC):
+    def __init__(self, port, baudrate=115200, timeout=1):
+        self.port = port
+        self.baudrate = baudrate
+        self.timeout = timeout
+        self.serial_connection = None
+        self.is_connected = False
+        self._rx_thread = None
+        self._tx_thread = None
+        self._rx_callback = None
+        self._tx_buffer = deque()  # TX buffer (FIFO queue)
+        self._tx_lock = threading.Lock()  # Lock for thread-safe access to the TX buffer
+
+    @abstractmethod
+    def rx_callback(self, data):
+        """
+        Abstract method that will be called when data is received.
+        This method should be implemented by subclasses to define
+        how to handle the incoming data.
+        """
+        pass
+
+    def connect(self):
+        """
+        Establish serial connection.
+        """
+        if not self.is_connected:
+            try:
+                self.serial_connection = serial.Serial(
+                    self.port, baudrate=self.baudrate, timeout=self.timeout
+                )
+                self.is_connected = True
+                print(f"{self.port} Connected; {self.baudrate} baud.")
+                self._start_rx_thread()
+                self._start_tx_thread()  # Start the TX thread when connected
+            except Exception:
+                pass
+
+    def disconnect(self):
+        """
+        Close serial connection.
+        """
+        if self.is_connected:
+            self.is_connected = False
+            if self._rx_thread is not None:
+                self._rx_thread.join()  # Wait for the RX thread to finish.
+            if self._tx_thread is not None:
+                self._tx_thread.join()  # Wait for the TX thread to finish.
+            if self.serial_connection:
+                self.serial_connection.close()
+                print(f"{self.port} Disconnected")
+        else:
+            print(f"{self.port} No active connection to disconnect.")
+
+    def _start_rx_thread(self):
+        """
+        Start a background thread to handle data reception.
+        """
+        def receive_data():
+            while self.is_connected:
+                if self.serial_connection.in_waiting > 0:
+                    data = self.serial_connection.read(self.serial_connection.in_waiting)
+                    if self._rx_callback:
+                        print(f"{self.port} Data received: {data}")
+                        self._rx_callback(data)
+                    else:
+                        self.rx_callback(data)
+                time.sleep(0.1)
+
+        self._rx_thread = threading.Thread(target=receive_data)
+        self._rx_thread.daemon = True
+        self._rx_thread.start()
+
+    def _start_tx_thread(self):
+        """
+        Start a background thread to handle data transmission from the TX buffer.
+        """
+        def transmit_data():
+            while self.is_connected:
+                with self._tx_lock:
+                    if self._tx_buffer:
+                        data = self._tx_buffer.popleft()  # Get data from TX buffer
+                        self.serial_connection.write(data)
+                        print(f"{self.port} tx: {data}")
+                time.sleep(0.1)
+
+        self._tx_thread = threading.Thread(target=transmit_data)
+        self._tx_thread.daemon = True
+        self._tx_thread.start()
+
+    def set_rx_callback(self, callback):
+        """
+        Set a custom RX callback function.
+        """
+        self._rx_callback = callback
+
+    def tx(self, data):
+        """
+        Add data to the TX buffer.
+        """
+        if self.is_connected:
+            with self._tx_lock:
+                self._tx_buffer.append(data)  # Add data to TX buffer
+                # print(f"{self.port} Data added to TX buffer: {data}")
+        else:
+            print(f"{self.port} Not connected. Cannot transmit data.")
+
+    def rx(self):
+        """
+        Return the latest data received from the serial port.
+        """
+        if self.is_connected:
+            data = self.serial_connection.read(self.serial_connection.in_waiting)
+            return data
+        else:
+            print(f"{self.port} Not connected. Cannot receive data.")
+            return None
+
+
+--------------------------------------------------------------------------------
+File: androidapp.py
+import logging
+import os
+import bluetooth
+import time
+from queue import Queue, Empty
+
+from protocol import Protocol
+from communication import AbstractSerialInterface
+from sharedResources import SharedRsc, sharedResources
+import definitions
+
+logger = logging.getLogger("AndroidApp")
+
+class AppMessageProtocol:
+    sharedResources: SharedRsc = None
+
+    @classmethod
+    def init_shared_resources(cls):
+        logger.info("[AppMessageProtocol] Initializing shared resources")
+        cls.sharedResources.set("TASK.MODE.REQ", Queue(1))
+        cls.sharedResources.set("TASK.STATUS.REQ", Queue(1))
+        cls.sharedResources.set("APP.MOVE.REQ", Queue(1))
+
+    @classmethod
+    def set_shared_resources(cls, shared_resources):
+        cls.sharedResources = shared_resources
+
+    @classmethod
+    def decode_message(cls, msg: str):
+        stripped = msg.strip()
+        if not (stripped.startswith("/*") and stripped.endswith("*/")):
+            logger.warning("Invalid message format: %s", msg)
+            return
+        cmdstr = stripped.removeprefix("/*").removesuffix("*/")
+        parts = cmdstr.split("=")
+        if len(parts) != 2:
+            logger.warning("Malformed command: %s", msg)
+            return
+        cmd, val = parts
+        cls.call_cmd(cmd, val)
+
+    @classmethod
+    def process_taskmode(cls, val):
+        if val not in definitions.MODES:
+            logger.warning("Invalid mode: %s", val)
+            return
+        try:
+            cls.sharedResources.get("TASK.MODE.REQ").put_nowait(val)
+            logger.info(f"Task mode set to {val}")
+        except Exception as e:
+            logger.error("Error setting task mode: %s", e)
+
+    @classmethod
+    def process_task_status(cls, val):
+        if val not in definitions.TASKSTATUSES:
+            logger.warning("Invalid task status: %s", val)
+            return
+        try:
+            cls.sharedResources.get("TASK.STATUS.REQ").put_nowait(val)
+            logger.info(f"Task status set to {val}")
+        except Exception as e:
+            logger.error("Error setting task status: %s", e)
+
+    @classmethod
+    def process_mmove(cls, val):
+        if val not in definitions.MOVES:
+            logger.warning("Invalid move command: %s", val)
+            return
+        try:
+            cls.sharedResources.get("APP.MOVE.REQ").put_nowait(val)
+            logger.info(f"Move command received: {val}")
+        except Exception as e:
+            logger.error("Error processing move command: %s", e)
+
+    @classmethod
+    def process_map(cls, val):
+        if (cls.sharedResources.get("TASK.STATUS") == "IN-PROGRESS" and 
+            str(cls.sharedResources.get("TASK.MODE")).startswith("TASK")):
+            logger.warning("Map update rejected; task in progress.")
+            return
+        cls.sharedResources.set("MAP.NEW.FLAG", 1)
+        cls.sharedResources.set("MAP.STR", val)
+        logger.info(f"Map updated: {val}")
+
+    @classmethod
+    def call_cmd(cls, cmd, val):
+        cmds = {
+            "TASKMODE": cls.process_taskmode,
+            "TASKSTATUSREQ": cls.process_task_status,
+            "MMOVE": cls.process_mmove,
+            "MAP": cls.process_map,
+        }
+        if cmd in cmds:
+            cmds[cmd](val)
+        else:
+            logger.warning("Unknown command received: %s", cmd)
+
+class AppInterface(AbstractSerialInterface):
+    sharedResources: SharedRsc = None
+    msg_protocol_cls = AppMessageProtocol
+
+    def setup_protocol(self):
+        self.msg_protocol_cls.set_shared_resources(self.sharedResources)
+        self.msg_protocol_cls.init_shared_resources()
+
+    def set_shared_resources(self, shared_resources):
+        self.sharedResources = shared_resources
+
+    def rx_callback(self, msg):
+        # Automatically process the message via the protocol.
+        logger.info(f"Android RX: {msg}")
+        self.msg_protocol_cls.decode_message(msg)
+
+    def setup_bluetooth(self, bt_port=1, bind_timeout=10):
+        self.bt_port = bt_port
+        logger.info("Setting up Bluetooth on port %d", bt_port)
+        os.system("sudo hciconfig hci0 piscan")
+        os.system(f"sudo sdptool add --channel={bt_port} SP")
+        os.system(f"sudo rfcomm listen 0 {bt_port} &")
+        server_sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
+        start_time = time.time()
+        while True:
+            try:
+                server_sock.bind(("", bt_port))
+                server_sock.listen(1)
+                logger.info(f"[BT] Bound to port {bt_port}")
+                break
+            except Exception as e:
+                logger.error("[BT] Could not bind to port %d: %s", bt_port, e)
+                if time.time() - start_time > bind_timeout:
+                    logger.error("Bluetooth bind timeout reached.")
+                    break
+                time.sleep(1)
+        logger.info(f"[BT] Waiting for connection on RFCOMM channel {bt_port}")
+
+class AndroidApp:
+    def __init__(self, port):
+        self.interface = AppInterface(port=port, baudrate=115200)
+        self.interface.set_shared_resources(sharedResources)
+        self.interface.setup_protocol()
+
+    def connect(self):
+        self.interface.connect()
+
+    def disconnect(self):
+        self.interface.disconnect()
+
+    def send_command(self, command: str):
+        """Standardized API to send any command from Android side."""
+        self.interface.tx(command)
+        logger.info(f"Sent command from Android: {command}")
+
+    def transmit_map_details(self):
+        """Sends map details using the standardized API."""
+        command = "MAP_DETAILS"  # Placeholder for the actual command format.
+        self.send_command(command)
+
+    def transmit_bot_location(self):
+        """Sends bot location using the standardized API."""
+        command = "BOT_LOCATION"  # Placeholder for the actual command format.
+        self.send_command(command)
+
+--------------------------------------------------------------------------------
+File: main.py
+import logging
+import time
+import threading
+from car import Car
+from androidapp import AndroidApp
+from taskserver import TaskServer
+from sharedResources import sharedResources
+import definitions
+
+# Set logging level to INFO
+logging.basicConfig(level=logging.INFO)
+
+# Mapping of option numbers to command strings.
+COMMAND_OPTIONS = {
+    "1": "/*TASKMODE=MANUAL*/",
+    "2": "/*TASKMODE=TASK1*/",
+    "3": "/*TASKMODE=TASK2*/",
+    "4": "/*TASKMODE=TASKB*/",
+    "5": "/*TASKSTATUSREQ=START*/",
+    "6": "/*TASKSTATUSREQ=PAUSE*/",
+    "7": "/*TASKSTATUSREQ=STOP*/",
+    "8": "/*MMOVE=F*/",
+    "9": "/*MMOVE=B*/",
+    "10": "/*MMOVE=L*/",
+    "11": "/*MMOVE=R*/",
+    "12": "/*MAP=[(0, 00, 00, 1),(1, 00, 00, 2)]*/"
+}
+
+def display_menu():
+    menu = """
+Choose a command to send (simulating Android sending to your app):
+ 1: Set TASKMODE to MANUAL
+ 2: Set TASKMODE to TASK1
+ 3: Set TASKMODE to TASK2
+ 4: Set TASKMODE to TASKB
+ 5: Set TASKSTATUSREQ to START
+ 6: Set TASKSTATUSREQ to PAUSE
+ 7: Set TASKSTATUSREQ to STOP
+ 8: Send MMOVE command: F
+ 9: Send MMOVE command: B
+10: Send MMOVE command: L
+11: Send MMOVE command: R
+12: Send MAP update command
+Type 'exit' to quit.
+"""
+    print(menu)
+
+def terminal_interface(android_app: AndroidApp, stop_event: threading.Event):
+    """
+    Terminal-based input loop that simulates incoming messages from the Android app.
+    Instead of sending commands out, it passes them to the Android interface's rx_callback,
+    so the message is processed by the app and ultimately by the TaskServer.
+    """
+    logging.info("Terminal interface started. Use the menu options to send commands.")
+    while not stop_event.is_set():
+        try:
+            display_menu()
+            choice = input("Enter option number: ").strip()
+            if choice.lower() == "exit":
+                stop_event.set()
+                break
+            command = COMMAND_OPTIONS.get(choice)
+            if command:
+                logging.info(f"Simulating reception of command: {command}")
+                # Simulate the Android interface receiving the command.
+                android_app.interface.rx_callback(command)
+            else:
+                print("Invalid option. Please try again.")
+        except Exception as e:
+            logging.error("Error in terminal input: %s", e)
+            stop_event.set()
+
+def main():
+    # Instantiate devices using the standardized APIs.
+    car = Car(port='/dev/ttyUSB0')
+    android_app = AndroidApp(port='/dev/rfcomm0')
+    
+    # Create and set up the TaskServer.
+    task_server = TaskServer(car, android_app, sharedResources)
+    task_server.setup()
+
+    stop_event = threading.Event()
+    terminal_thread = threading.Thread(target=terminal_interface, args=(android_app, stop_event), daemon=True)
+
+    try:
+        # Connect devices using their public methods.
+        if not car.interface.is_connected:
+            car.connect()
+        if not android_app.interface.is_connected:
+            android_app.connect()
+
+        # Start the TaskServer loop in its own thread.
+        task_server.start()
+
+        # Start the terminal interface thread.
+        terminal_thread.start()
+
+        # Keep the main thread active until "exit" is entered.
+        while not stop_event.is_set():
+            time.sleep(1)
+
+    except KeyboardInterrupt:
+        logging.info("KeyboardInterrupt received. Shutting down...")
+        stop_event.set()
+
+    finally:
+        # Cleanly stop the TaskServer and disconnect devices.
+        task_server.stop()
+        car.disconnect()
+        android_app.disconnect()
+        logging.info("Shutdown complete.")
+
+if __name__ == "__main__":
+    main()
+
+--------------------------------------------------------------------------------
+File: sharedResources.py
+from queue import Queue
+
+
+class SharedRsc:
+    data = {}
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def set(cls, key: str, val):
+        cls.data[key] = val    
+    
+    @classmethod
+    def get(cls, key):
+        return cls.data.get(key, None)
+
+sharedResources = SharedRsc()
+
+--------------------------------------------------------------------------------
+File: car.py
+import logging
+from communication import AbstractSerialInterface
+from sharedResources import SharedRsc, sharedResources
+from queue import Queue
+import definitions
+
+logger = logging.getLogger("Car")
+
+class CarMessageProtocol:
+    sharedResources = None
+
+    @classmethod
+    def init_shared_resources(cls):
+        logger.info("[CarMessageProtocol] Initializing shared resources")
+        cls.sharedResources.set("CAR.MOVE.REQ", Queue(1))
+        cls.sharedResources.set("CAR.STATUS", "IDLE")
+
+    @classmethod
+    def set_shared_resources(cls, shared_resources):
+        cls.sharedResources = shared_resources
+
+    @classmethod
+    def decode_message(cls, msg):
+        try:
+            decoded_msg = msg.decode('utf-8').strip()
+            logger.debug(f"Car RX Decoded: {decoded_msg}")
+            
+            # Processing incoming messages from the car
+            if decoded_msg.startswith("RANGE"):
+                parts = decoded_msg.split()
+                if len(parts) >= 2:
+                    try:
+                        range_value = float(parts[1])
+                        cls.sharedResources.set("CAR.RANGE", range_value)
+                        logger.info(f"Updated car range: {range_value}")
+                    except ValueError:
+                        logger.warning(f"Invalid range value: {parts[1]}")
+            
+            elif decoded_msg.startswith("GYRO:"):
+                # Process GYRO data - z-bearing only
+                try:
+                    # Extract the value after "GYRO: "
+                    gyro_str = decoded_msg.replace("GYRO:", "").strip()
+                    z_bearing = float(gyro_str)
+                    cls.sharedResources.set("CAR.GYRO.Z", z_bearing)
+                    logger.debug(f"Updated car z-bearing: {z_bearing}")
+                except ValueError:
+                    logger.warning(f"Invalid GYRO value: {decoded_msg}")
+            
+            elif decoded_msg.startswith("STATUS"):
+                parts = decoded_msg.split()
+                if len(parts) >= 2:
+                    status = parts[1]
+                    cls.sharedResources.set("CAR.STATUS", status)
+                    logger.info(f"Updated car status: {status}")
+            
+            else:
+                logger.debug(f"Unhandled car message: {decoded_msg}")
+                
+        except Exception as e:
+            logger.error(f"Error decoding car message: {e}")
+
+    @classmethod
+    def encode_move(cls, direction: str, distance: int = 10):
+        """
+        Encodes a movement command according to the car's protocol.
+        
+        Args:
+            direction: Direction to move ('F', 'B', 'L', 'R')
+            distance: Distance value or angle (depends on direction)
+            
+        Returns:
+            Formatted command string for the car
+        """
+        if direction not in definitions.MOVES:
+            logger.warning(f"Invalid direction: {direction}")
+            return None
+            
+        # Format commands according to car's protocol
+        if direction == "F":
+            return f"SF{str(distance).zfill(3)}"
+        elif direction == "B":
+            return f"SB{str(distance).zfill(3)}"
+        elif direction == "L":
+            return f"TL{str(distance).zfill(3)}"
+        elif direction == "R":
+            return f"TR{str(distance).zfill(3)}"
+        
+    @classmethod
+    def encode_stop(cls):
+        """Encodes a stop command for the car."""
+        return "STOP"
+
+class CarInterface(AbstractSerialInterface):
+    def __init__(self, port, baudrate=115200, timeout=1):
+        super().__init__(port, baudrate, timeout)
+        self.msg_protocol_cls = CarMessageProtocol
+        
+    def set_shared_resources(self, shared_resources):
+        self.sharedResources = shared_resources
+        self.msg_protocol_cls.set_shared_resources(shared_resources)
+        
+    def setup_protocol(self):
+        """Initialize protocol and shared resources"""
+        self.msg_protocol_cls.init_shared_resources()
+        
+    def rx_callback(self, data):
+        """Process received data using the protocol decoder"""
+        logger.debug(f"Car RX: {data}")
+        self.msg_protocol_cls.decode_message(data)
+
+class Car:
+    def __init__(self, port):
+        self.interface = CarInterface(port=port, baudrate=115200)
+        self.interface.set_shared_resources(sharedResources)
+        self.interface.setup_protocol()
+
+    def connect(self):
+        """Connect to the car hardware"""
+        self.interface.connect()
+
+    def disconnect(self):
+        """Disconnect from the car hardware"""
+        self.interface.disconnect()
+
+    def send_command(self, command: str):
+        """
+        Standardized API to send any command to the car.
+        
+        Args:
+            command: The formatted command string to send
+        """
+        if isinstance(command, str):
+            command = command.encode('utf-8')
+        self.interface.tx(command)
+        logger.info(f"Sent command to Car: {command}")
+
+    def move(self, direction: str, distance: int = 10):
+        """
+        Sends a move command to the car using the standardized protocol.
+        
+        Args:
+            direction: Direction to move ('F', 'B', 'L', 'R')
+            distance: Distance value or angle (depends on direction)
+        """
+        command = CarMessageProtocol.encode_move(direction, distance)
+        if command:
+            self.send_command(command)
+        else:
+            logger.error(f"Failed to generate move command for direction: {direction}")
+
+    def stop(self):
+        """Sends a stop command to the car."""
+        command = CarMessageProtocol.encode_stop()
+        self.send_command(command)
+--------------------------------------------------------------------------------
+File: taskserver.py
+import threading
+import time
+import logging
+from queue import Queue, Empty
+from sharedResources import SharedRsc, sharedResources
+from definitions import *
+from car import Car
+from androidapp import AndroidApp
+
+logger = logging.getLogger("TaskServer")
+
+class TaskServer:
+    def __init__(self, car: Car, android_app: AndroidApp, shared_resources: SharedRsc):
+        self.car = car
+        self.android_app = android_app
+        self.shared_resources = shared_resources
+        self.current_mode = "MANUAL"
+        self.mode_changed = False
+        self._running = False
+        self.loop_thread = None
+
+        # Ensure mode request queue exists
+        if not self.shared_resources.get("TASK.MODE.REQ"):
+            self.shared_resources.set("TASK.MODE.REQ", Queue(1))
+
+    def setup_manual(self):
+        logger.info("[TaskServer] Setting up MANUAL mode")
+        self.shared_resources.set("APP.MOVE.REQ", Queue(1))
+    
+    def loop_manual(self):
+        logger.debug("[TaskServer] Loop MANUAL mode")
+        try:
+            move_cmd = self.shared_resources.get("APP.MOVE.REQ").get_nowait()
+            # Use standardized API: move_standard for Car.
+            self.car.move(move_cmd)
+        except Empty:
+            pass
+
+    def setup_task1(self):
+        logger.info("[TaskServer] Setting up TASK1 mode")
+        # TODO: Initialize components specific to TASK1.
+        pass
+
+    def loop_task1(self):
+        logger.debug("[TaskServer] Loop TASK1 mode")
+        # TODO: Add processing logic for TASK1.
+        pass
+
+    def setup_task2(self):
+        logger.info("[TaskServer] Setting up TASK2 mode")
+        # TODO: Initialize components specific to TASK2.
+        pass
+
+    def loop_task2(self):
+        logger.debug("[TaskServer] Loop TASK2 mode")
+        # TODO: Add processing logic for TASK2.
+        pass
+
+    def setup_taskB(self):
+        logger.info("[TaskServer] Setting up TASKB mode")
+        # TODO: Initialize components specific to TASKB.
+        pass
+
+    def loop_taskB(self):
+        logger.debug("[TaskServer] Loop TASKB mode")
+        # TODO: Add processing logic for TASKB.
+        pass
+
+    def setup(self):
+        logger.info("[TaskServer] Setup")
+        self.shared_resources.set("TASK.MODE", "MANUAL")
+        self.setup_manual()
+
+    def _handle_mode_change(self):
+        try:
+            mode_queue = self.shared_resources.get("TASK.MODE.REQ")
+            new_mode = mode_queue.get_nowait()
+            self.shared_resources.set("TASK.MODE", new_mode)
+            self.current_mode = new_mode
+            self.mode_changed = True
+            logger.info(f"Switched to mode: {new_mode}")
+        except Empty:
+            pass
+
+    def loop(self):
+        self._running = True
+        while self._running:
+            self.mode_changed = False
+            self._handle_mode_change()
+            mode = self.shared_resources.get("TASK.MODE")
+            if mode is None:
+                mode = "MANUAL"
+                self.shared_resources.set("TASK.MODE", mode)
+            if mode == "MANUAL":
+                if self.mode_changed:
+                    self.setup_manual()
+                self.loop_manual()
+            elif mode == "TASK1":
+                if self.mode_changed:
+                    self.setup_task1()
+                self.loop_task1()
+            elif mode == "TASK2":
+                if self.mode_changed:
+                    self.setup_task2()
+                self.loop_task2()
+            elif mode == "TASKB":
+                if self.mode_changed:
+                    self.setup_taskB()
+                self.loop_taskB()
+            else:
+                logger.warning("Unknown mode: %s", mode)
+            time.sleep(0.05)
+
+    def start(self):
+        if self.loop_thread is None or not self.loop_thread.is_alive():
+            self.loop_thread = threading.Thread(target=self.loop, daemon=True)
+            self.loop_thread.start()
+            logger.info("TaskServer started.")
+
+    def stop(self):
+        self._running = False
+        if self.loop_thread:
+            self.loop_thread.join()
+            logger.info("TaskServer stopped.")
+
+--------------------------------------------------------------------------------
+File: protocol.py
+class Protocol:
+    @staticmethod
+    def serialize(message):
+        return message.encode('utf-8')
+
+    @staticmethod
+    def deserialize(data):
+        return data.decode('utf-8')
+--------------------------------------------------------------------------------
