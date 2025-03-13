@@ -1786,7 +1786,8 @@ class GameSolverTask1:
                 else:
                     command = command[:1] + "F" + command[1:]
             position_update['command'] = command
-            command_list.append(position_update)
+            # command_list.append(position_update)
+            command_list.append(json.dumps(position_update))
 
         command_list.append("--scan image--")
 

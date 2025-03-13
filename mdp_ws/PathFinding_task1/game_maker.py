@@ -1,5 +1,5 @@
 from ObjectTypes.object_types import Position, Facing, LocationType, Car, GameTask1, Direction
-from constants import CAR_X_START_POS, CAR_Y_START_POS, OBSTACLE_COUNT, GRID_COUNT
+from .constants import CAR_X_START_POS, CAR_Y_START_POS, OBSTACLE_COUNT, GRID_COUNT
 
 import math
 from typing import List, Type
@@ -31,9 +31,9 @@ class GameMaker:
             for a in range(GRID_COUNT)
         ]
         arena = self.randomly_place_obstacles(arena=arena)
-
-        game = GameTask1(arena=arena, car=self.car)
-        return game
+        return arena
+        # game = GameTask1(arena=arena, car=self.car)
+        # return game
 
     def randomly_place_obstacles(self, arena: List[List[Position]]):
         obstacle_count = 0

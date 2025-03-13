@@ -45,7 +45,7 @@ class Visualiser:
             (self.width * SCALE_FACTOR, self.height * SCALE_FACTOR)
         )
         pygame.display.set_caption("Path Finding")
-        self.car_image = pygame.image.load("car.png").convert_alpha()
+        self.car_image = pygame.image.load("ComputerServer/car.png").convert_alpha()
         self.car_image = pygame.transform.scale(
             self.car_image, (15 * SCALE_FACTOR, 25 * SCALE_FACTOR)
         )

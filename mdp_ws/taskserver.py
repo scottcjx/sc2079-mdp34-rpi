@@ -81,10 +81,10 @@ class TaskServer:
         # Check if map data is available
         map_str = self.shared_resources.get("MAP.STR")
         if map_str:
-            self._process_map_data(map_str)
+            processed_map_str = self._process_map_data(map_str)
 
         try:
-            self.algo_main.main()
+            self.algo_main.main(processed_map_str)
             logger.info("algo main successful")
 
         except:
