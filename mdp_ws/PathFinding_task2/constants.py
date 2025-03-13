@@ -1,0 +1,60 @@
+from ObjectTypes.object_types import Direction
+
+WHITE = (255, 255, 255)
+RED = (252, 203, 199)
+BLUE1 = (0, 0, 255)
+BLUE2 = (0, 100, 255)
+BLACK = (0, 0, 0)
+YELLOW = (255, 255, 0)
+DARK_RED = (139, 0, 0)
+LIGHT_RED = (255, 102, 102)
+DARK_BLUE = (0, 0, 139)
+LIGHT_BLUE = (173, 216, 230)
+DARK_GRAY = (169, 169, 169)
+LIGHT_GRAY = (211, 211, 211)
+GREEN = (217, 255, 230)
+DARK_GREEN = (0, 100, 0)
+ORANGE = (255, 165, 0)
+PURPLE = (128, 0, 128)
+PINK = (255, 192, 203)
+CYAN = (0, 255, 255)
+MAGENTA = (255, 0, 255)
+
+SCALE_FACTOR = 4
+START_BOX_SIZE = 30
+GRID_COUNT = 20
+CAR_X_START_POS = 5
+CAR_Y_START_POS = 5
+OBSTACLE_COUNT = 5
+ARENA_SIZE = 200
+REVERSE_STRAIGHT_DISTANCE = 20
+CAR_SPEED = 1
+CAR_TURNING_RADIUS = 31
+RENDER_SPEED = 0.01
+TURNING_RADIAN_INCREMENT = CAR_SPEED / CAR_TURNING_RADIUS
+GRID_SIZE = ARENA_SIZE // GRID_COUNT
+LOWER_GRID_BOUND = 5
+HIGHER_GRID_BOUND = 195
+CAR_BACK_TO_CENTER = 8
+
+SAFETY_DISTANCE_EDGE = 5
+SAFETY_DISTANCE_OBSTACLE = 10
+SAFETY_DISTANCE_TURNING_OBSTACLE = 38
+SAFETY_DISTANCE_TURNING_EDGE = 35
+LANDING_DISTANCE = 4
+ANGLE_SUPPLEMENT = 0.2
+
+RCHED_LOC_TAG = "RECHED_LOC_TAG:"
+TASK2_DISTANCE_NEXT_TO_OBSTACLE_1 = 25
+TASK2_CAR_START_X = 100
+TASK2_CAR_START_Y = 25
+TASK2_CAR_ASS_OUTOFPARKING = 20
+# TASK2_BUFFER_OBSTACLE2 = 15
+LEGAL_MOVES = [
+    [Direction.left, Direction.straight, Direction.left],  # Done
+    [Direction.left, Direction.straight, Direction.right],  # Done
+    [Direction.left, Direction.right, Direction.left],
+    [Direction.right, Direction.straight, Direction.left],  # Done
+    [Direction.right, Direction.straight, Direction.right],  # Done
+    [Direction.right, Direction.left, Direction.right],
+]

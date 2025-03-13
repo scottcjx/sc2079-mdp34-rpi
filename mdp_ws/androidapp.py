@@ -1,10 +1,10 @@
 import logging
 import os
-import bluetooth
+#import bluetooth
 import time
 from queue import Queue, Empty
 
-from protocol import Protocol
+#from protocol import Protocol
 from communication import AbstractSerialInterface
 from sharedResources import SharedRsc, sharedResources
 import definitions
@@ -110,7 +110,7 @@ class AppInterface(AbstractSerialInterface):
         # Automatically process the message via the protocol.
         logger.info(f"Android RX: {msg}")
         self.msg_protocol_cls.decode_message(msg)
-
+"""
     def setup_bluetooth(self, bt_port=1, bind_timeout=10):
         self.bt_port = bt_port
         logger.info("Setting up Bluetooth on port %d", bt_port)
@@ -132,7 +132,7 @@ class AppInterface(AbstractSerialInterface):
                     break
                 time.sleep(1)
         logger.info(f"[BT] Waiting for connection on RFCOMM channel {bt_port}")
-
+"""
 class AndroidApp:
     def __init__(self, port):
         self.interface = AppInterface(port=port, baudrate=115200)

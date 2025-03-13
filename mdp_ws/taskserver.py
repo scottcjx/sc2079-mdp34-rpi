@@ -7,6 +7,12 @@ from definitions import *
 from car import Car
 from androidapp import AndroidApp
 
+#####
+from ComputerServer.data_manager import DataManager
+from PathFinding_task2.Task2_Pathfinding_Manager import Pathfinding_Task2_Manager
+from ObjectTypes.object_types import *
+#####
+
 logger = logging.getLogger("TaskServer")
 
 class TaskServer:
@@ -19,6 +25,18 @@ class TaskServer:
         self._running = False
         self.loop_thread = None
 
+        #####
+        # Task-specific components
+        self.data_manager = DataManager()
+        self.task2_manager = Pathfinding_Task2_Manager()
+        self.task2_manager.set_data_manager(self.data_manager)
+        
+        # Status tracking
+        self.task_status = "STOP"
+        self.current_command_index = 0
+        self.commands = []
+        #####
+
         # Ensure mode request queue exists
         if not self.shared_resources.get("TASK.MODE.REQ"):
             self.shared_resources.set("TASK.MODE.REQ", Queue(1))
@@ -26,6 +44,10 @@ class TaskServer:
     def setup_manual(self):
         logger.info("[TaskServer] Setting up MANUAL mode")
         self.shared_resources.set("APP.MOVE.REQ", Queue(1))
+        #####
+        self.shared_resources.set("TASK.STATUS", "STOP")
+        self.task_status = "STOP"
+        #####
     
     def loop_manual(self):
         logger.debug("[TaskServer] Loop MANUAL mode")
@@ -39,31 +61,110 @@ class TaskServer:
     def setup_task1(self):
         logger.info("[TaskServer] Setting up TASK1 mode")
         # TODO: Initialize components specific to TASK1.
+        #####
+        if self.data_manager:
+            self.data_manager.update_mode(SessionMode.task1)
+        
+        # Reset status
+        self.shared_resources.set("TASK.STATUS", "STOP")
+        self.task_status = "STOP"
+        self.current_command_index = 0
+        self.commands = []
+
+        # Setup required queues
+        if not self.shared_resources.get("MAP.NEW.FLAG"):
+            self.shared_resources.set("MAP.NEW.FLAG", 0)
+        
+        # Check if map data is available
+        map_str = self.shared_resources.get("MAP.STR")
+        if map_str:
+            self._process_map_data(map_str)
+        #####
         pass
 
     def loop_task1(self):
         logger.debug("[TaskServer] Loop TASK1 mode")
         # TODO: Add processing logic for TASK1.
+        #####
+        # Check for map updates
+        if self.shared_resources.get("MAP.NEW.FLAG") == 1:
+            map_str = self.shared_resources.get("MAP.STR")
+            if map_str:
+                self._process_map_data(map_str)
+            self.shared_resources.set("MAP.NEW.FLAG", 0)
+        
+        # Check for status change
+        self._check_task_status_change()
+        
+        # Check car response
+        car_status = self.shared_resources.get("CAR.STATUS")
+        if car_status == "IDLE" and self.task_status == "IN-PROGRESS":
+            self._handle_car_response('A')
+        #####
         pass
 
     def setup_task2(self):
         logger.info("[TaskServer] Setting up TASK2 mode")
         # TODO: Initialize components specific to TASK2.
+        #####
+        if self.data_manager:
+            self.data_manager.update_mode(SessionMode.task2)
+        
+        # Reset status
+        self.shared_resources.set("TASK.STATUS", "STOP")
+        self.task_status = "STOP"
+        self.current_command_index = 0
+        self.commands = []
+        #####
         pass
 
     def loop_task2(self):
         logger.debug("[TaskServer] Loop TASK2 mode")
         # TODO: Add processing logic for TASK2.
+        #####
+        # Check for status change
+        self._check_task_status_change()
+        
+        # Check car response
+        car_status = self.shared_resources.get("CAR.STATUS")
+        if car_status == "IDLE" and self.task_status == "IN-PROGRESS":
+            self._handle_car_response('A')
+        
+        # Check for ultrasonic distance updates
+        car_range = self.shared_resources.get("CAR.RANGE")
+        if car_range is not None and self.task_status == "IN-PROGRESS":
+            self.data_manager.handle_ultrasonic(str(car_range))
+        #####
         pass
 
     def setup_taskB(self):
         logger.info("[TaskServer] Setting up TASKB mode")
         # TODO: Initialize components specific to TASKB.
+        #####
+        # Initialize components specific to TASKB (obstacle scanning)
+        if self.data_manager:
+            self.data_manager.update_mode(SessionMode.obstacle_scanning)
+        
+        # Reset status
+        self.shared_resources.set("TASK.STATUS", "STOP")
+        self.task_status = "STOP"
+        self.current_command_index = 0
+        self.commands = []
+        #####
         pass
 
     def loop_taskB(self):
         logger.debug("[TaskServer] Loop TASKB mode")
         # TODO: Add processing logic for TASKB.
+        #####
+        # Check for status change
+        self._check_task_status_change()
+        
+        # Check car response
+        car_status = self.shared_resources.get("CAR.STATUS")
+        if car_status == "IDLE" and self.task_status == "IN-PROGRESS":
+            self._handle_car_response('A')
+        #####
         pass
 
     def setup(self):
