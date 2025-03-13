@@ -2,10 +2,42 @@ import cv2
 import torch
 from ultralytics import YOLO
 
+data_dict = {
+    '0':'11',
+    '1':'12',
+    '2':'13',
+    '3':'14',
+    '4':'15',
+    '5':'16',
+    '6':'17',
+    '7':'18',
+    '8':'19',
+    '9':'20',
+    '10':'21',
+    '11':'22',
+    '12':'23',
+    '13':'24',
+    '14':'25',
+    '15':'26',
+    '16':'27',
+    '17':'28',
+    '18':'29',
+    '19':'30',
+    '20':'31',
+    '21':'33',
+    '22':'34',
+    '23':'35',
+    '24':'36',
+    '25':'40',
+    '27':'36',
+    '28':'37',
+    '29':'39', #left arrow
+    '30':'38' #right arrow
+}
 
 confs = {
     "yolo_model": "../models/mdp-det-v0.pt",  # Or any other model you want to use
-    "camera_port": "/dev/video0"
+    "camera_port": 0
 }
 
 FLIP_IMAGE = False  # Set this to True to flip the image and bounding boxes
@@ -154,7 +186,9 @@ class ObjectTracker:
                 self.proc_frame = cv2.rectangle(self.proc_frame, (x1, y1), (x2, y2), color, 2)
 
                 # Draw the label and confidence
-                label = f"Class {int(cls)}: {conf:.2f}"
+                #label = f"Class {int(cls)}: {conf:.2f}"
+                label = f"IMG ID: {data_dict[str(int(cls))]}: {conf:.2f}"
+
 
                 # Check if flipping is enabled
                 if FLIP_IMAGE:
@@ -186,3 +220,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

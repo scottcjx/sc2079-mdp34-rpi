@@ -6,6 +6,39 @@ import torch
 from ultralytics import YOLO
 
 
+data_dict = {
+    '0':'11',
+    '1':'12',
+    '2':'13',
+    '3':'14',
+    '4':'15',
+    '5':'16',
+    '6':'17',
+    '7':'18',
+    '8':'19',
+    '9':'20',
+    '10':'21',
+    '11':'22',
+    '12':'23',
+    '13':'24',
+    '14':'25',
+    '15':'26',
+    '16':'27',
+    '17':'28',
+    '18':'29',
+    '19':'30',
+    '20':'31',
+    '21':'33',
+    '22':'34',
+    '23':'35',
+    '24':'36',
+    '25':'40',
+    '27':'36',
+    '28':'37',
+    '29':'39', #left arrow
+    '30':'38' #right arrow
+}
+
 class CVModel:
     def __init__(self, yolo_model_name):
         self.yolo_model_name = yolo_model_name
@@ -79,6 +112,9 @@ class ObjectTracker:
         self.mid_w = self.mid_h = 0
         self.x_req = self.y_req = 0
         self.w = self.h = 0  # Add these attributes to store frame width and height
+        #####
+        self.proc_frame = None  # Add proc_frame attribute
+        #####
 
     def set_cvmodel(self, cvmodel: CVModel):
         self.cvmodel = cvmodel
@@ -93,7 +129,8 @@ class ObjectTracker:
 
     def openStream(self):
         if self.cvvisualizer:
-            self.cvvisualizer.readStream()
+            #self.cvvisualizer.readStream()
+            self.cvvisualizer.read_stream()
             self.cvvisualizer.get_frame_details()
             # Update width and height from cvvisualizer after getting frame details
             self.w = self.cvvisualizer.w
@@ -105,18 +142,50 @@ class ObjectTracker:
     def closeStream(self):
         if self.cvvisualizer:
             self.cvvisualizer.closeStream()
-
+#####
+    def screenshot(self):
+        """Capture and display a screenshot from the current frame"""
+        if self.proc_frame is not None:
+            # Display the screenshot in a separate window
+            cv2.imshow("Screenshot", self.proc_frame)
+            
+            # Create a screenshots directory if it doesn't exist
+            import os
+            import datetime
+            
+            screenshot_dir = "screenshots"
+            if not os.path.exists(screenshot_dir):
+                os.makedirs(screenshot_dir)
+                print(f"Created directory: {screenshot_dir}")
+            
+            # Save to disk with timestamp in the screenshots directory
+            timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            filename = os.path.join(screenshot_dir, f'screenshot_{timestamp}.png')
+            cv2.imwrite(filename, self.proc_frame)
+            print(f"Screenshot saved as {filename}")
+#####
     def run(self):
         self.openStream()
         while True:
-            self.cvvisualizer.readStream()
+            #self.cvvisualizer.readStream()
+            self.cvvisualizer.read_stream()
             self.cvmodel.predict(self.cvvisualizer.cap_frame)
             self.cvmodel.inference_locations()
             self.process_frame()
             self.cvvisualizer.showStream(self.proc_frame)
+            """
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 self.closeStream()
                 break
+            """
+            # Check for key presses
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                self.closeStream()
+                break
+            elif key == ord('c'):
+                # Take a screenshot when 'c' is pressed
+                self.screenshot()
 
     def process_frame(self):
         if self.cvvisualizer.cap_frame is None:
@@ -149,7 +218,7 @@ class ObjectTracker:
                 self.proc_frame = cv2.rectangle(self.proc_frame, (x1, y1), (x2, y2), color, 2)
 
                 # Draw the label and confidence
-                label = f"Class {int(cls)}: {conf:.2f}"
+                label = f"IMG ID: {data_dict[str(int(cls))]}: {conf:.2f}"
 
                 # Adjust label position for the flipped image
                 label_x = x1
@@ -193,8 +262,10 @@ class ObjectTracker:
 
 
 confs = {
-    "yolo_model": "mdp-det-v0.pt",  # Or any other model you want to use
-    "camera_port": "/dev/video0"
+    #"yolo_model": "mdp-det-v0.pt",  # Or any other model you want to use
+    "yolo_model": "best.pt",
+    #"camera_port": "/dev/video0"
+    "camera_port": 4
 }
 
 def main():
@@ -202,6 +273,7 @@ def main():
     cvmodel.set_model()
 
     cvvisualizer = CvVisualizer(camera_port=confs["camera_port"])
+    cvvisualizer.read_stream_active = 1
 
     objectTracker = ObjectTracker()
     objectTracker.set_cvmodel(cvmodel)
