@@ -13,6 +13,7 @@ from ComputerServer.main import AlgoMain
 from ComputerServer.data_manager import DataManager
 from PathFinding_task2.Task2_Pathfinding_Manager import Pathfinding_Task2_Manager
 from ObjectTypes.object_types import *
+from mt_cv import CVModel, CvVisualizer, ObjectTracker
 #####
 
 logger = logging.getLogger("TaskServer")
@@ -34,6 +35,20 @@ class TaskServer:
         self.task2_manager = Pathfinding_Task2_Manager()
         self.task2_manager.set_data_manager(self.data_manager)
         
+        self.confs = {
+        "yolo_model": "best.pt",  # Change to your YOLO model path
+        "camera_port": 0
+        }
+        self.cv_model = CVModel(self.confs["yolo_model"])
+        self.cv_model.set_model()
+
+        self.cvvisualizer = CvVisualizer(camera_port=self.confs["camera_port"])
+
+        # 3) Create the object tracker, set references
+        self.obj_tracker = ObjectTracker(capture_screenshots=True, screenshot_dir="./screenshot", num_screenshots=5,screenshot_interval=0.5)
+        self.obj_tracker.set_cvmodel(self.cv_model)
+        self.obj_tracker.set_cvvisualizer(self.cvvisualizer)
+
         # Status tracking
         self.task_status = "STOP"
         self.current_command_index = 0
@@ -84,11 +99,14 @@ class TaskServer:
             processed_map_str = self._process_map_data(map_str)
 
         try:
-            self.algo_main.main(processed_map_str)
-            logger.info("algo main successful")
+            self.obj_tracker.run()
+            logger.info("cv working")
+            # self.algo_main.main(processed_map_str)
+            # logger.info("algo main successful")
 
-        except:
-            logger.error("algo main failed")
+        except Exception as e:
+            logger.exception(f"cv not working: {e}")
+
         #####
         pass
 
@@ -104,7 +122,7 @@ class TaskServer:
             self.shared_resources.set("MAP.NEW.FLAG", 0)
         
         # Check for status change
-        self._check_task_status_change()
+        # self._check_task_status_change()
         
         # Check car response
         car_status = self.shared_resources.get("CAR.STATUS")
