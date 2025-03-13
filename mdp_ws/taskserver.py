@@ -1,3 +1,4 @@
+import re
 import threading
 import time
 import logging
@@ -8,6 +9,7 @@ from car import Car
 from androidapp import AndroidApp
 
 #####
+from ComputerServer.main import AlgoMain
 from ComputerServer.data_manager import DataManager
 from PathFinding_task2.Task2_Pathfinding_Manager import Pathfinding_Task2_Manager
 from ObjectTypes.object_types import *
@@ -27,6 +29,7 @@ class TaskServer:
 
         #####
         # Task-specific components
+        self.algo_main = AlgoMain()
         self.data_manager = DataManager()
         self.task2_manager = Pathfinding_Task2_Manager()
         self.task2_manager.set_data_manager(self.data_manager)
@@ -62,8 +65,8 @@ class TaskServer:
         logger.info("[TaskServer] Setting up TASK1 mode")
         # TODO: Initialize components specific to TASK1.
         #####
-        if self.data_manager:
-            self.data_manager.update_mode(SessionMode.task1)
+        # if self.data_manager:
+        #     self.data_manager.update_mode(SessionMode.task1)
         
         # Reset status
         self.shared_resources.set("TASK.STATUS", "STOP")
@@ -79,6 +82,13 @@ class TaskServer:
         map_str = self.shared_resources.get("MAP.STR")
         if map_str:
             self._process_map_data(map_str)
+
+        try:
+            self.algo_main.main()
+            logger.info("algo main successful")
+
+        except:
+            logger.error("algo main failed")
         #####
         pass
 
@@ -212,6 +222,42 @@ class TaskServer:
                 logger.warning("Unknown mode: %s", mode)
             time.sleep(0.05)
 
+    def _process_map_data(self, map_str):
+        """
+        Process a map string in the format MAP=[[0,06,12,0],[1,10,19,2],[2,14,15,1]]
+        
+        Args:
+            map_str (str): A string representing map data
+        
+        Returns:
+            list: A list of dictionaries representing obstacle data
+        """
+        # Extract the map data using regex
+        match = re.search(r'MAP=\[\[(.*?)\]\]', map_str)
+        if not match:
+            raise ValueError("Invalid map string format")
+        
+        # Extracted content inside MAP=[[]]
+        map_data_str = match.group(1)
+
+        # Convert the string to a list of lists
+        map_data = [item.strip().split(',') for item in map_data_str.split('],[')]
+
+        # Convert to the required format
+        processed_data = []
+        facing_map = {0: 'N', 1: 'S', 2: 'E', 3: 'W'}
+
+        for obstacle in map_data:
+            processed_obstacle = {
+                "dir": facing_map[int(obstacle[3])],  # Convert facing index to direction
+                "x": int(obstacle[1]),  # Convert X coordinate
+                "y": int(obstacle[2]),  # Convert Y coordinate
+                "id": int(obstacle[0])  # Convert ID
+            }
+            processed_data.append(processed_obstacle)
+
+        return processed_data
+    
     def start(self):
         if self.loop_thread is None or not self.loop_thread.is_alive():
             self.loop_thread = threading.Thread(target=self.loop, daemon=True)

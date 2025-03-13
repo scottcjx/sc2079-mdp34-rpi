@@ -5,14 +5,13 @@ import math
 import json 
 
 class AlgoMain:
-    def __init__(self, obstacle_pos: str):
+    def __init__(self):
         self.gametask1 = None 
         self.sale_path = None 
-        self.obstacle_pos = obstacle_pos
 
-    def main(self):
-        print(self.obstacle_pos)
-        obstacle_positions = self.obstacle_pos.replace("'", '"')
+    def main(self, obstacle_pos):
+        print(obstacle_pos)
+        obstacle_positions = obstacle_pos.replace("'", '"')
         # obstacle_positions = self.obstacle_pos
         data = json.loads(obstacle_positions)
         positions = []
