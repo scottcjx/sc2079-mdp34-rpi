@@ -1,3 +1,4 @@
+from queue import Queue
 import re
 from PathFinding_task1.game_solver import GameSolverTask1
 from PathFinding_task1.game_maker import GameMaker
@@ -61,7 +62,7 @@ class AlgoMain:
         self.gametask1 = game
         # print(game)
         self.solve_game_task1()
-        commands = json.dumps(self.sale_path.movement_string, indent=4)
+        commands = self.sale_path.movement_string
         return commands
 
     def solve_game_task1(self):
@@ -148,6 +149,79 @@ if __name__ == "__main__":
 
         return processed_data
     
+    def _create_command_queue(commands): 
+        """
+        Creates a queue from a list of movement commands, including scan image commands.
+
+        Args:
+            commands (list): A list of movement commands in string format.
+
+        Returns:
+            Queue: A queue where each element is a dictionary containing 'x', 'y', and 'command'.
+        """
+        command_queue = Queue()
+
+        for command in commands:
+            if command.startswith("{"):  # JSON formatted command
+                try:
+                    command_data = json.loads(command)
+                    car_position = command_data["car_position"]
+                    queue_block = {
+                        "x": car_position["x"],
+                        "y": car_position["y"],
+                        "command": command_data["command"]
+                    }
+                    command_queue.put(queue_block)
+                except json.JSONDecodeError:
+                    print(f"Error decoding JSON: {command}")
+            elif command == "--scan image--":  # Add scan image command to queue
+                queue_block = {
+                    "x": None,  # No specific position for scanning
+                    "y": None,
+                    "command": "--scan image--"
+                }
+                command_queue.put(queue_block)
+
+        return command_queue
+
+    def _format_commands(command_list):
+        """
+        Extracts and formats commands from a list of mixed command strings.
+
+        Args:
+            command_list (list): A list containing movement commands in string format.
+
+        Returns:
+            list: A list of formatted commands with appropriate conversions.
+        """
+        command_mapping = {
+            "RF": "TR",
+            "RB": "RB",
+            "LF": "TL",
+            "LB": "LB",
+            "SF": "SF",
+            "SB": "SB"
+        }
+
+        formatted_commands = []
+
+        for command in command_list:
+            if command.startswith("{"):  # JSON formatted movement command
+                try:
+                    command_data = json.loads(command)
+                    original_command = command_data["command"]
+                    match = re.match(r"([A-Z]+)(\d+)", original_command)
+                    if match:
+                        command_type, number = match.groups()
+                        new_command = command_mapping.get(command_type, command_type) + number
+                        formatted_commands.append(new_command)  # Only store the formatted command
+                except json.JSONDecodeError:
+                    print(f"Error decoding JSON: {command}")
+            elif command == "--scan image--":  # Preserve scan command
+                formatted_commands.append(command)
+        
+        return formatted_commands
+    
     
     map_string = print_obstacles(arena)
     # Process the map data
@@ -160,6 +234,9 @@ if __name__ == "__main__":
     try:
         commands = algo_main.main(processed_data)
         print(commands)
+        formatted_commands = _format_commands(commands)
+        print(formatted_commands)
+        queued_commands = _create_command_queue(formatted_commands)
         print("hehe passed")
     except:
         print("failed")

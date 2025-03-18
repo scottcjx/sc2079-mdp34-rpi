@@ -47,12 +47,17 @@ class CarMessageProtocol:
                 except ValueError:
                     logger.warning(f"Invalid GYRO value: {decoded_msg}")
             
-            elif decoded_msg.startswith("STATUS"):
-                parts = decoded_msg.split()
-                if len(parts) >= 2:
-                    status = parts[1]
-                    cls.sharedResources.set("CAR.STATUS", status)
-                    logger.info(f"Updated car status: {status}")
+            # elif decoded_msg.startswith("STATUS"):
+            #     parts = decoded_msg.split()
+            #     if len(parts) >= 2:
+            #         status = parts[1]
+            #         cls.sharedResources.set("CAR.STATUS", status)
+            #         logger.info(f"Updated car status: {status}")
+            elif decoded_msg == 'A':
+                    currstate = cls.sharedResources.get("CAR.STATUS")
+                    if (currstate == definitions.MOVINGSTATUSES[1]):
+                        cls.sharedResources.set("CAR.STATUS", definitions.MOVINGSTATUSES[-1])
+                        logger.info(f"Updated car status: {definitions.MOVINGSTATUSES[-1]}")
             
             else:
                 logger.debug(f"Unhandled car message: {decoded_msg}")

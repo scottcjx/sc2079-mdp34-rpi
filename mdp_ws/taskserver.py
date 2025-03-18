@@ -1,3 +1,4 @@
+import json
 import re
 import threading
 import time
@@ -10,8 +11,8 @@ from androidapp import AndroidApp
 
 #####
 from ComputerServer.main import AlgoMain
-from ComputerServer.data_manager import DataManager
-from PathFinding_task2.Task2_Pathfinding_Manager import Pathfinding_Task2_Manager
+# from ComputerServer.data_manager import DataManager
+# from PathFinding_task2.Task2_Pathfinding_Manager import Pathfinding_Task2_Manager
 from ObjectTypes.object_types import *
 from mt_cv import CVModel, CvVisualizer, ObjectTracker
 #####
@@ -31,9 +32,9 @@ class TaskServer:
         #####
         # Task-specific components
         self.algo_main = AlgoMain()
-        self.data_manager = DataManager()
-        self.task2_manager = Pathfinding_Task2_Manager()
-        self.task2_manager.set_data_manager(self.data_manager)
+        # self.data_manager = DataManager()
+        # self.task2_manager = Pathfinding_Task2_Manager()
+        # self.task2_manager.set_data_manager(self.data_manager)
         
         self.confs = {
         "yolo_model": "best.pt",  # Change to your YOLO model path
@@ -101,9 +102,11 @@ class TaskServer:
         try:
             self.obj_tracker.run()
             logger.info("cv working")
-            # self.algo_main.main(processed_map_str)
-            # logger.info("algo main successful")
-
+            commands = self.algo_main.main(processed_map_str)
+            formatted_commands = self._format_commands(commands)
+            self.command_queue = self._create_command_queue(formatted_commands)
+            logger.info("algo main successful")
+            
         except Exception as e:
             logger.exception(f"cv not working: {e}")
 
@@ -123,11 +126,22 @@ class TaskServer:
         
         # Check for status change
         # self._check_task_status_change()
+
+        # if car.status != MOVINGSTATUS[-1]:
+        #     command_queue.get()
+        #     car.interface.tx cmd
+        #     car.status = MOVINGSTATUS[1]
+
+        car_status = self.shared_resources.get("CAR.STATUS")
+        if car_status != MOVINGSTATUSES[-1]:
+            cmd = self.command_queue.get()
+            self.car.interface.tx(cmd)
+            self.shared_resources.set("CAR.STATUS", MOVINGSTATUSES[1])
         
         # Check car response
-        car_status = self.shared_resources.get("CAR.STATUS")
-        if car_status == "IDLE" and self.task_status == "IN-PROGRESS":
-            self._handle_car_response('A')
+        # car_status = self.shared_resources.get("CAR.STATUS")
+        # if car_status == MOVINGSTATUSES[-1] and self.task_status == "IN-PROGRESS":
+        #     self._handle_car_response()
         #####
         pass
 
@@ -275,6 +289,80 @@ class TaskServer:
             processed_data.append(processed_obstacle)
 
         return processed_data
+    
+
+    def _create_command_queue(self, commands): 
+        """
+        Creates a queue from a list of movement commands, including scan image commands.
+
+        Args:
+            commands (list): A list of movement commands in string format.
+
+        Returns:
+            Queue: A queue where each element is a dictionary containing 'x', 'y', and 'command'.
+        """
+        command_queue = Queue()
+
+        for command in commands:
+            if command.startswith("{"):  # JSON formatted command
+                try:
+                    command_data = json.loads(command)
+                    car_position = command_data["car_position"]
+                    queue_block = {
+                        "x": car_position["x"],
+                        "y": car_position["y"],
+                        "command": command_data["command"]
+                    }
+                    command_queue.put(queue_block)
+                except json.JSONDecodeError:
+                    print(f"Error decoding JSON: {command}")
+            elif command == "--scan image--":  # Add scan image command to queue
+                queue_block = {
+                    "x": None,  # No specific position for scanning
+                    "y": None,
+                    "command": "--scan image--"
+                }
+                command_queue.put(queue_block)
+
+        return command_queue
+
+    def _format_commands(self, command_list):
+        """
+        Extracts and formats commands from a list of mixed command strings.
+
+        Args:
+            command_list (list): A list containing movement commands in string format.
+
+        Returns:
+            list: A list of formatted commands with appropriate conversions.
+        """
+        command_mapping = {
+            "RF": "TR",
+            "RB": "RB",
+            "LF": "TL",
+            "LB": "LB",
+            "SF": "SF",
+            "SB": "SB"
+        }
+
+        formatted_commands = []
+
+        for command in command_list:
+            if command.startswith("{"):  # JSON formatted movement command
+                try:
+                    command_data = json.loads(command)
+                    original_command = command_data["command"]
+                    match = re.match(r"([A-Z]+)(\d+)", original_command)
+                    if match:
+                        command_type, number = match.groups()
+                        new_command = command_mapping.get(command_type, command_type) + number
+                        formatted_commands.append(new_command)  # Only store the formatted command
+                except json.JSONDecodeError:
+                    print(f"Error decoding JSON: {command}")
+            elif command == "--scan image--":  # Preserve scan command
+                formatted_commands.append(command)
+        
+        return formatted_commands
     
     def start(self):
         if self.loop_thread is None or not self.loop_thread.is_alive():
