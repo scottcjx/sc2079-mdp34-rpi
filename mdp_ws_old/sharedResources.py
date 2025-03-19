@@ -25,6 +25,7 @@ carMovementFSM.setState(carMovementStates.WAITING)
 
 fsm = 0
 fsm2 = 0
+arrow = -1
 movementstatus = 0
 
 mtcv_detections = None

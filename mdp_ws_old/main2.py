@@ -16,8 +16,9 @@ def main():
     cvvisualizer = CvVisualizer(camera_port="/dev/video0")
     mtcv = MultiThreadedObjectTracker(cvmodel, cvvisualizer)
 
-    carInterface = CarInterface(port='/dev/ttyUSB0', baudrate=115200)
     appInterface = AppInterface(port='/dev/rfcomm0', baudrate=9600)
+    carInterface = CarInterface(port='/dev/ttyUSB0', baudrate=115200)
+    
 
     def cls_det():
         det = []
@@ -31,18 +32,22 @@ def main():
     def rx_app_cmd(data: bytes):
         datastr = data.decode()
         print(datastr)
-        if datastr == "/MOVE,F":
-            carInterface.tx(b"SF005")
-        elif datastr == "/MOVE,L":
-            carInterface.tx(b"TL045")
-        elif datastr == "/MOVE,R":
-            carInterface.tx(b"TR045")
+        #if datastr == "/MOVE,F":
+        #    carInterface.tx(b"SF005")
+        #elif datastr == "/MOVE,L":
+        #    carInterface.tx(b"TL045")
+        #elif datastr == "/MOVE,R":
+        #    carInterface.tx(b"TR045")
+        if datastr == "/*TASKSTATUSREQ=START*/":
+            carInterface.tx(b"S")
     
     def rx_car_status(data: bytes):
         datastr = data.decode()
         print(datastr)
         if datastr == 'A':
             sharedResources.movementstatus = 2
+        if datastr == 'C':
+            sharedResources.movementstatus = 0
         
     
     sharedResources.movementstatus = 0
@@ -52,14 +57,16 @@ def main():
 
     def bullseyeTask():
         det = cls_det()
-        if 0 in det:
+        if 30 in det():
             sharedResources.fsm = 1
-            print("det 0")
-        elif 3 in det:
-            sharedResources.fsm = 2
-            print("det 3")
+            sharedResources.arrow = 0
+            print("[cv] detected right")
+        elif 29 in det():
+            sharedResources.fsm = 1
+            sharedResources.arrow = 1
+            print("[cv] detected left")
         else:
-            sharedResources.fsm = 0
+            sharedResources.fsm = 2
 
         # default move fwd
         if sharedResources.fsm == 0:
@@ -70,34 +77,57 @@ def main():
                 print("compl move")
                 sharedResources.movementstatus = 0
 
-        elif sharedResources.fsm == 1:
+        elif sharedResources.fsm == 1: # detected arrow
 
-            if sharedResources.fsm2 == 0:
-                if sharedResources.movementstatus == 0:
-                    carInterface.tx(b"TL045")
-                    sharedResources.movementstatus = 1
-                if sharedResources.movementstatus == 2:
-                    print("compl move")
-                    sharedResources.fsm2 = 1
-                    sharedResources.movementstatus = 0
+            if sharedResources.fsm2 == 1: # if at obstacle 1
+                if sharedResources.arrow == 0: # arrow is right
+                    if sharedResources.movementstatus == 0:
+                        carInterface.tx(b"R")
+                        sharedResources.movementstatus = 1
+                    if sharedResources.movementstatus == 2:
+                        print("compl move")
+                        sharedResources.movementstatus = 0
+                        carInterface.tx(b"D")
+                        det.clear()
+                        sharedResources.fsm2 = 2
+
+
+                if sharedResources.arrow == 1: # arrow is left
+                    if sharedResources.movementstatus == 0:
+                        carInterface.tx(b"L")
+                        sharedResources.movementstatus = 1
+                    if sharedResources.movementstatus == 2:
+                        print("compl move")
+                        sharedResources.movementstatus = 0
+                        carInterface.tx(b"D")
+                        det.clear()
+                        sharedResources.fsm2 = 2
                 
-            elif sharedResources.fsm2 == 1:
-                if sharedResources.movementstatus == 0:
-                    carInterface.tx(b"SF010")
-                    sharedResources.movementstatus = 1
-                if sharedResources.movementstatus == 2:
-                    print("compl move")
-                    sharedResources.fsm2 = 2
-                    sharedResources.movementstatus = 0
+            elif sharedResources.fsm2 == 2: # if at obstacle 2
+                if sharedResources.arrow == 0: # arrow is right
+                    if sharedResources.movementstatus == 0:
+                        carInterface.tx(b"R")
+                        sharedResources.movementstatus = 1
+                    if sharedResources.movementstatus == 2:
+                        print("compl move")
+                        sharedResources.movementstatus = 0
 
-            elif sharedResources.fsm2 == 2:
-                if sharedResources.movementstatus == 0:
-                    carInterface.tx(b"TR045")
-                    sharedResources.movementstatus = 1
-                if sharedResources.movementstatus == 2:
-                    print("compl move")
-                    sharedResources.fsm2 = 0
-                    sharedResources.movementstatus = 0
+                if sharedResources.arrow == 1: # arrow is left
+                    if sharedResources.movementstatus == 0:
+                        carInterface.tx(b"L")
+                        sharedResources.movementstatus = 1
+                    if sharedResources.movementstatus == 2:
+                        print("compl move")
+                        sharedResources.movementstatus = 0
+
+            # elif sharedResources.fsm2 == 2:
+            #     if sharedResources.movementstatus == 0:
+            #         carInterface.tx(b"TR045") #move right 45deg
+            #         sharedResources.movementstatus = 1
+            #     if sharedResources.movementstatus == 2:
+            #         print("compl move")
+            #         sharedResources.fsm2 = 0
+            #         sharedResources.movementstatus = 0
             sharedResources.fsm = 0
 
     appInterface.set_rx_callback(rx_app_cmd)
@@ -134,7 +164,7 @@ def main():
         # appInterface.disconnect()
         mtcv.stop()
 
-    setup()
+    #setup()
     time.sleep(0.1)
     try:
         while True:
